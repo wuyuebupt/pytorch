@@ -316,5 +316,51 @@ void AnnotateEffects(std::shared_ptr<Graph>& graph) {
   EliminateDeadCode(graph);
 }
 
+bool CanRelocate(
+    const Block* block,
+    const Node* insertAfter,
+    const std::unordered_set<const Node*>& group) {
+  // Give all nodes a position i
+  std::map<const Node*, size_t> nodeToPositions;
+  std::map<size_t, const Node*> positionsToNode;
+  size_t position = 0;
+  for (const auto node : block->nodes()) {
+    nodeToPositions[node] = position;
+    positionsToNode[position] = node;
+    position++;
+  }
+
+  // Check if relocation will violate value dependencies
+  const auto insertPosition = nodeToPositions[insertAfter];
+  std::unordered_set<const Node*> dependencies;
+
+  for (const auto node : group) {
+    for (const auto input : node->inputs()) {
+      dependencies.insert(input->node());
+    }
+  }
+
+  std::unordered_set<const Node*> violating;
+  for (const auto dependency : dependencies) {
+    if (group.count(dependency) != 0) {
+      // ignore other members of the group. TODO explain why
+      continue;
+    }
+    if (nodeToPositions[dependency] > insertPosition) {
+      violating.insert(dependency);
+    }
+  }
+
+  // If all dependencies precede the insert position, we can relocate
+  if (violating.size() == 0) {
+    return true;
+  }
+
+  // TODO prev() could be exposed here
+  // Check if we can relocate the violating dependencies above the insert
+  // position
+  return CanRelocate(
+      block, positionsToNode[nodeToPositions[insertAfter] - 1], violating);
+}
 } // namespace jit
 } // namespace torch
